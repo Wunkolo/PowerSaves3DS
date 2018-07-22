@@ -89,8 +89,8 @@ struct powersaves_device
 {
 	struct hid_device* hid;
 	struct mutex mutex;
-	// used for transfer DMAs
-	u8* buffer;
+	// REPORT_SIZE-buffer for DMA tranfers
+	uint8_t* buffer;
 };
 
 // URB_INTERRUPT transfers
@@ -100,7 +100,7 @@ static int powersaves_send_command(
 	const struct powersaves_command* command
 )
 {
-	u8* commandbuffer = NULL;
+	uint8_t* commandbuffer = NULL;
 	int result = 0;
 
 	// buffer must be dma-capable, not on stack
@@ -114,12 +114,8 @@ static int powersaves_send_command(
 	{
 		return -ENOMEM;
 	}
+
 	mutex_lock(&powersaves->mutex);
-	// result = hid_hw_output_report(
-	// 	powersaves->hid,
-	// 	commandbuffer,
-	// 	REPORT_SIZE
-	// );
 	result = hid_hw_raw_request(
 		powersaves->hid,
 		0,
@@ -409,6 +405,3 @@ static struct hid_driver powersaves_driver = {
 };
 
 module_hid_driver(powersaves_driver);
-
-// https://github.com/torvalds/linux/blob/master/drivers/hid/hid-steam.c
-// https://github.com/torvalds/linux/tree/master/drivers/hid
