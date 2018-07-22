@@ -83,7 +83,7 @@ struct powersaves_command
 
 #define REPORT_SIZE sizeof(struct powersaves_command)
 
-////
+// PowerSaves driver data
 
 struct powersaves_device
 {
@@ -141,7 +141,7 @@ static int powersaves_send_command(
 
 static int powersaves_recv(
 	struct powersaves_device* powersaves,
-	uint8_t* buffer,
+	void* buffer,
 	size_t size
 )
 {
@@ -182,6 +182,114 @@ static int powersaves_recv(
 	return result;
 }
 
+// PowerSaves command utils
+
+int powersaves_get_gameid(
+	struct powersaves_device* powersaves,
+	uint32_t* GameID
+)
+{
+	int result = 0;
+	struct powersaves_command curcommand = { 0 };
+	uint8_t* Response = kzalloc(0x2000, GFP_KERNEL);
+	uint8_t Magic[8] = {
+		0x71, 0xC9, 0x3F, 0xE9, 0xBB, 0x0A, 0x3B, 0x18
+	};
+	// Mode Switch
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeSwitch;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+
+	// Mode: NTR
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeROM;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+
+	// Test
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_Test;
+	curcommand.ResponseLength = 64;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		REPORT_SIZE
+	);
+	hid_info(
+		powersaves->hid,
+		"Test: %.64s\n",
+		Response
+	);
+
+	// NTR_Reset
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	curcommand.ResponseLength = 0x2000;
+	curcommand.NTRCommand = 0x9F;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		0x2000
+	);
+	hid_info(
+		powersaves->hid,
+		"NTR_Reset: %.64s\n",
+		Response
+	);
+
+	// Unknown
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	memcpy(curcommand.u8, Magic, 8);
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		REPORT_SIZE
+	);
+	hid_info(
+		powersaves->hid,
+		"Magic: %.64s\n",
+		Response
+	);
+
+	// Get gamecard ID
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	curcommand.ResponseLength = 4;
+	curcommand.NTRCommand = 0x90;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		GameID,
+		4
+	);
+	kzfree(Response);
+	return result;
+}
+
 /// HID Callbacks
 
 static int powersaves_probe(
@@ -191,11 +299,7 @@ static int powersaves_probe(
 {
 	int result = 0;
 	struct powersaves_device* powersaves;
-	struct powersaves_command curcommand = { 0 };
-	uint8_t* Response = kzalloc(0x2000, GFP_KERNEL);
-	uint8_t Magic[8] = {
-		0x71, 0xC9, 0x3F, 0xE9, 0xBB, 0x0A, 0x3B, 0x18
-	};
+	uint32_t GameID = 0;
 
 	hid_info(
 		hdev,
@@ -271,103 +375,13 @@ static int powersaves_probe(
 		hdev->phys
 	);
 
-	// Mode Switch
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_ModeSwitch;
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
+	powersaves_get_gameid( powersaves, &GameID);
 
-	// Mode: NTR
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_ModeROM;
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
-
-	// Test
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_Test;
-	curcommand.ResponseLength = 64;
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
-	powersaves_recv(
-		powersaves,
-		Response,
-		REPORT_SIZE
-	);
-	hid_info(
-		hdev,
-		"Test: %.64s\n",
-		Response
-	);
-
-	// NTR_Reset
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_NTR;
-	curcommand.CommandLength = 8;
-	curcommand.ResponseLength = 0x2000;
-	curcommand.NTRCommand = 0x9F;
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
-	powersaves_recv(
-		powersaves,
-		Response,
-		0x2000
-	);
-	hid_info(
-		hdev,
-		"NTR_Reset: %.64s\n",
-		Response
-	);
-
-	// Unknown
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_NTR;
-	curcommand.CommandLength = 8;
-	memcpy(curcommand.u8, Magic, 8);
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
-	powersaves_recv(
-		powersaves,
-		Response,
-		REPORT_SIZE
-	);
-	hid_info(
-		hdev,
-		"Magic: %.64s\n",
-		Response
-	);
-
-	// Get gamecard ID
-	curcommand = (struct powersaves_command){0};
-	curcommand.ID = CMD_NTR;
-	curcommand.CommandLength = 8;
-	curcommand.ResponseLength = 4;
-	curcommand.NTRCommand = 0x90;
-	powersaves_send_command(
-		powersaves,
-		&curcommand
-	);
-	powersaves_recv(
-		powersaves,
-		Response,
-		REPORT_SIZE
-	);
 	hid_info(
 		hdev,
 		"Gamecart ID: %08X\n",
-		*(uint32_t*)Response
+		GameID
 	);
-	kzfree(Response);
 	return result;
 }
 
@@ -391,7 +405,7 @@ static void powersaves_remove(struct hid_device *hdev)
 }
 
 static const struct hid_device_id powersaves_device_list[] = {
-	{ HID_USB_DEVICE(0x1C1A,0x03D5) },
+	{ HID_USB_DEVICE( 0x1C1A, 0x03D5 ) },
 	{}
 };
 
