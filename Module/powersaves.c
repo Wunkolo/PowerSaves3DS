@@ -69,13 +69,14 @@ enum powersaves_ntr_command
 };
 struct powersaves_command
 {
-	uint8_t ReportNumber;
 	uint8_t ID;
 	uint16_t CommandLength;
 	uint16_t ResponseLength;
 	union
 	{
 		uint8_t SPICommand;
+		uint8_t CTRCommand;
+		uint8_t NTRCommand;
 		uint8_t u8[59];
 	};
 } __attribute__((packed));
@@ -121,7 +122,7 @@ static int powersaves_send_command(
 	// );
 	result = hid_hw_raw_request(
 		powersaves->hid,
-		command->ReportNumber,
+		0,
 		commandbuffer,
 		REPORT_SIZE,
 		HID_OUTPUT_REPORT,
@@ -144,8 +145,8 @@ static int powersaves_send_command(
 
 static int powersaves_recv(
 	struct powersaves_device* powersaves,
-	u8* buffer,
-	unsigned int size
+	uint8_t* buffer,
+	size_t size
 )
 {
 	int result = 0;
@@ -195,8 +196,8 @@ static int powersaves_probe(
 	int result = 0;
 	struct powersaves_device* powersaves;
 	struct powersaves_command curcommand = { 0 };
-	u8 Response[64];
-	u8 Magic[] = {
+	uint8_t* Response = kzalloc(0x2000, GFP_KERNEL);
+	uint8_t Magic[8] = {
 		0x71, 0xC9, 0x3F, 0xE9, 0xBB, 0x0A, 0x3B, 0x18
 	};
 
@@ -301,7 +302,7 @@ static int powersaves_probe(
 	powersaves_recv(
 		powersaves,
 		Response,
-		64
+		REPORT_SIZE
 	);
 	hid_info(
 		hdev,
@@ -314,12 +315,11 @@ static int powersaves_probe(
 	curcommand.ID = CMD_NTR;
 	curcommand.CommandLength = 8;
 	curcommand.ResponseLength = 0x2000;
-	curcommand.u8[0] = 0x9F;
+	curcommand.NTRCommand = 0x9F;
 	powersaves_send_command(
 		powersaves,
 		&curcommand
 	);
-	u8* temp = kzalloc(0x2000,GFP_KERNEL);
 	powersaves_recv(
 		powersaves,
 		Response,
@@ -330,13 +330,12 @@ static int powersaves_probe(
 		"NTR_Reset: %.64s\n",
 		Response
 	);
-	kfree(temp);
 
 	// Unknown
 	curcommand = (struct powersaves_command){0};
 	curcommand.ID = CMD_NTR;
 	curcommand.CommandLength = 8;
-	memcpy(curcommand.u8,Magic,8);
+	memcpy(curcommand.u8, Magic, 8);
 	powersaves_send_command(
 		powersaves,
 		&curcommand
@@ -344,7 +343,7 @@ static int powersaves_probe(
 	powersaves_recv(
 		powersaves,
 		Response,
-		64
+		REPORT_SIZE
 	);
 	hid_info(
 		hdev,
@@ -357,7 +356,7 @@ static int powersaves_probe(
 	curcommand.ID = CMD_NTR;
 	curcommand.CommandLength = 8;
 	curcommand.ResponseLength = 4;
-	curcommand.u8[0] = 0x90;
+	curcommand.NTRCommand = 0x90;
 	powersaves_send_command(
 		powersaves,
 		&curcommand
@@ -365,14 +364,14 @@ static int powersaves_probe(
 	powersaves_recv(
 		powersaves,
 		Response,
-		64
+		REPORT_SIZE
 	);
 	hid_info(
 		hdev,
 		"Gamecart ID: %08X\n",
 		*(uint32_t*)Response
 	);
-
+	kzfree(Response);
 	return result;
 }
 
