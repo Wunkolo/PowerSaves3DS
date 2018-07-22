@@ -250,7 +250,7 @@ static int powersaves_probe(
 	}
 	mutex_init(&powersaves->mutex);
 
-	hid_set_drvdata(hdev,powersaves);
+	hid_set_drvdata(hdev, powersaves);
 
 	// Start hardware
 	result = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
@@ -380,7 +380,7 @@ static void powersaves_remove(struct hid_device *hdev)
 		hdev->name,
 		hdev->phys
 	);
-	powersaves = hdev->driver_data;
+	powersaves = hid_get_drvdata(hdev);
 
 	if( !powersaves )
 	{
