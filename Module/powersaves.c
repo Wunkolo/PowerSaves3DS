@@ -7,6 +7,7 @@
 #include <linux/hid.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/string.h>
 #include <stddef.h>
 
 
@@ -68,7 +69,7 @@ enum powersaves_ntr_command
 };
 struct powersaves_command
 {
-	uint8_t Zero;
+	uint8_t ReportNumber;
 	uint8_t ID;
 	uint16_t CommandLength;
 	uint16_t ResponseLength;
@@ -79,13 +80,19 @@ struct powersaves_command
 	};
 } __attribute__((packed));
 
+#define REPORT_SIZE sizeof(struct powersaves_command)
+
 ////
 
 struct powersaves_device
 {
 	struct hid_device* hid;
 	struct mutex mutex;
+	// used for transfer DMAs
+	u8* buffer;
 };
+
+// URB_INTERRUPT transfers
 
 static int powersaves_send_command(
 	struct powersaves_device* powersaves,
@@ -94,9 +101,11 @@ static int powersaves_send_command(
 {
 	u8* commandbuffer = NULL;
 	int result = 0;
+
+	// buffer must be dma-capable, not on stack
 	commandbuffer = kmemdup(
 		command,
-		sizeof(struct powersaves_command),
+		REPORT_SIZE,
 		GFP_KERNEL
 	);
 
@@ -105,15 +114,31 @@ static int powersaves_send_command(
 		return -ENOMEM;
 	}
 	mutex_lock(&powersaves->mutex);
-	result = hid_hw_output_report(
+	// result = hid_hw_output_report(
+	// 	powersaves->hid,
+	// 	commandbuffer,
+	// 	REPORT_SIZE
+	// );
+	result = hid_hw_raw_request(
 		powersaves->hid,
+		command->ReportNumber,
 		commandbuffer,
-		sizeof(struct powersaves_command)
+		REPORT_SIZE,
+		HID_OUTPUT_REPORT,
+		HID_REQ_SET_REPORT
 	);
 	mutex_unlock(&powersaves->mutex);
 
 	kfree(commandbuffer);
 
+	if( result < 0 )
+	{
+		hid_err(
+			powersaves->hid,
+			"%s: error writing report\n",
+			__func__
+		);
+	}
 	return result;
 }
 
@@ -124,16 +149,38 @@ static int powersaves_recv(
 )
 {
 	int result = 0;
-
 	mutex_lock(&powersaves->mutex);
-	result = hid_hw_raw_request(
-		powersaves->hid,
-		0,
-		buffer,
-		65,
-		HID_OUTPUT_REPORT,
-		HID_REQ_GET_REPORT
-	);
+
+	// buffer must be dma-capable, not on stack
+
+	while( size )
+	{
+		result = hid_hw_raw_request(
+			powersaves->hid,
+			0,
+			powersaves->buffer,
+			REPORT_SIZE,
+			HID_INPUT_REPORT,
+			HID_REQ_GET_REPORT
+		);
+
+		if( result > 0)
+		{
+			memcpy(buffer,powersaves->buffer, min(size, REPORT_SIZE));
+			buffer += result;
+			size -= result;
+		}
+		else
+		{
+			hid_err(
+				powersaves->hid,
+				"%s: error reading report\n",
+				__func__
+			);
+			break;
+		}
+	}
+
 	mutex_unlock(&powersaves->mutex);
 	return result;
 }
@@ -147,11 +194,11 @@ static int powersaves_probe(
 {
 	int result = 0;
 	struct powersaves_device* powersaves;
-	// struct powersaves_command curcommand = { 0 };
-	// u8 Response[64];
-	// u8 Magic[] = {
-	// 	0x71, 0xC9, 0x3F, 0xE9, 0xBB, 0x0A, 0x3B, 0x18
-	// };
+	struct powersaves_command curcommand = { 0 };
+	u8 Response[64];
+	u8 Magic[] = {
+		0x71, 0xC9, 0x3F, 0xE9, 0xBB, 0x0A, 0x3B, 0x18
+	};
 
 	hid_info(
 		hdev,
@@ -180,11 +227,30 @@ static int powersaves_probe(
 	);
 	if( !powersaves )
 	{
+		hid_err(
+			hdev,
+			"%s: error allocating driver data\n",
+			__func__
+		);
 		return -ENOMEM;
 	}
 
 	// Init driver data
 	powersaves->hid = hdev;
+	powersaves->buffer = devm_kzalloc(
+		&hdev->dev,
+		REPORT_SIZE,
+		GFP_KERNEL
+	);
+	if( !powersaves->buffer )
+	{
+		hid_err(
+			hdev,
+			"%s: error allocating staging buffer\n",
+			__func__
+		);
+		return -ENOMEM;
+	}
 	mutex_init(&powersaves->mutex);
 
 	hid_set_drvdata(hdev,powersaves);
@@ -208,33 +274,118 @@ static int powersaves_probe(
 		hdev->phys
 	);
 
-	// Read card header
+	// Mode Switch
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeSwitch;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
 
-	// Mode switch
-	//curcommand.ID = CMD_Test;
-	
-	// powersaves_send_command(
-	// 	powersaves,
-	// 	&curcommand
-	// );
-	// powersaves_recv(
-	// 	powersaves,
-	// 	Response,
-	// 	64
-	// );
+	// Mode: NTR
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeROM;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+
+	// Test
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_Test;
+	curcommand.ResponseLength = 64;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		64
+	);
+	hid_info(
+		hdev,
+		"Test: %.64s\n",
+		Response
+	);
+
+	// NTR_Reset
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	curcommand.ResponseLength = 0x2000;
+	curcommand.u8[0] = 0x9F;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	u8* temp = kzalloc(0x2000,GFP_KERNEL);
+	powersaves_recv(
+		powersaves,
+		Response,
+		0x2000
+	);
+	hid_info(
+		hdev,
+		"NTR_Reset: %.64s\n",
+		Response
+	);
+	kfree(temp);
+
+	// Unknown
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	memcpy(curcommand.u8,Magic,8);
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		64
+	);
+	hid_info(
+		hdev,
+		"Magic: %.64s\n",
+		Response
+	);
+
+	// Get gamecard ID
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_NTR;
+	curcommand.CommandLength = 8;
+	curcommand.ResponseLength = 4;
+	curcommand.u8[0] = 0x90;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		Response,
+		64
+	);
+	hid_info(
+		hdev,
+		"Gamecart ID: %08X\n",
+		*(uint32_t*)Response
+	);
 
 	return result;
 }
 
 static void powersaves_remove(struct hid_device *hdev)
 {
+	struct powersaves_device* powersaves = NULL;
 	hid_info(
 		hdev,
 		"Disconnect: %.128s on %.64s",
 		hdev->name,
 		hdev->phys
 	);
-	struct powersaves_device* powersaves = hdev->driver_data;
+	powersaves = hdev->driver_data;
 
 	if( !powersaves )
 	{
