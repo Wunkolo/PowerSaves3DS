@@ -89,7 +89,7 @@ struct powersaves_device
 {
 	struct hid_device* hid;
 	struct mutex mutex;
-	// REPORT_SIZE-buffer for DMA tranfers
+	// buffer of REPORT_SIZE for DMA tranfers
 	uint8_t* buffer;
 };
 
@@ -100,33 +100,23 @@ static int powersaves_send_command(
 	const struct powersaves_command* command
 )
 {
-	uint8_t* commandbuffer = NULL;
 	int result = 0;
-
-	// buffer must be dma-capable, not on stack
-	commandbuffer = kmemdup(
+	memcpy(
+		powersaves->buffer,
 		command,
-		REPORT_SIZE,
-		GFP_KERNEL
+		REPORT_SIZE
 	);
-
-	if( !commandbuffer )
-	{
-		return -ENOMEM;
-	}
 
 	mutex_lock(&powersaves->mutex);
 	result = hid_hw_raw_request(
 		powersaves->hid,
 		0,
-		commandbuffer,
+		powersaves->buffer,
 		REPORT_SIZE,
 		HID_OUTPUT_REPORT,
 		HID_REQ_SET_REPORT
 	);
 	mutex_unlock(&powersaves->mutex);
-
-	kfree(commandbuffer);
 
 	if( result < 0 )
 	{
@@ -146,11 +136,10 @@ static int powersaves_recv(
 )
 {
 	int result = 0;
+	size_t readbytes = 0;
+
 	mutex_lock(&powersaves->mutex);
-
-	// buffer must be dma-capable, not on stack
-
-	while( size )
+	while( readbytes < size )
 	{
 		result = hid_hw_raw_request(
 			powersaves->hid,
@@ -161,11 +150,14 @@ static int powersaves_recv(
 			HID_REQ_GET_REPORT
 		);
 
-		if( result > 0)
+		if( result > 0 )
 		{
-			memcpy(buffer,powersaves->buffer, min(size, REPORT_SIZE));
-			buffer += result;
-			size -= result;
+			memcpy(
+				buffer + readbytes,
+				powersaves->buffer,
+				min(size, REPORT_SIZE)
+			);
+			readbytes += result;
 		}
 		else
 		{
@@ -177,8 +169,8 @@ static int powersaves_recv(
 			break;
 		}
 	}
-
 	mutex_unlock(&powersaves->mutex);
+
 	return result;
 }
 
