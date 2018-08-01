@@ -263,11 +263,15 @@ int powersaves_get_game_id(
 		response,
 		REPORT_SIZE
 	);
-	hid_info(
-		powersaves->hid,
-		"Test: %*phC\n",
+	print_hex_dump(
+		KERN_INFO,
+		"Test:",
+		DUMP_PREFIX_OFFSET,
+		8,
+		8,
+		response,
 		64,
-		response
+		true
 	);
 
 	// NTR_Reset
