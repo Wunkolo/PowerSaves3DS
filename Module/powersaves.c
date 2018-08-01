@@ -156,6 +156,20 @@ static int powersaves_send_command(
 	return result;
 }
 
+static void powersaves_read_int_callback(
+	struct urb* urb
+)
+{
+	struct powersaves_device* powersaves = urb->context;
+	if( urb->status )
+	{
+		hid_err(
+			powersaves->hid,
+			"Error reading interrupt: %d",
+			urb->status
+		);
+	}
+}
 static int powersaves_recv(
 	struct powersaves_device* powersaves,
 	void* buffer,
@@ -163,35 +177,49 @@ static int powersaves_recv(
 )
 {
 	int result = 0;
+	int bytes_read = 0;
 	size_t readbytes = 0;
 
 	mutex_lock(&powersaves->mutex);
 	while( readbytes < size )
 	{
-		result = hid_hw_raw_request(
-			powersaves->hid,
-			0,
+		// result = hid_hw_raw_request(
+		// 	powersaves->hid,
+		// 	0,
+		// 	powersaves->buffer,
+		// 	REPORT_SIZE,
+		// 	HID_INPUT_REPORT,
+		// 	HID_REQ_GET_REPORT
+		// );
+		result = usb_interrupt_msg(
+			powersaves->usb,
+			usb_rcvintpipe(
+				powersaves->usb,
+				0x81
+			),
 			powersaves->buffer,
 			REPORT_SIZE,
-			HID_INPUT_REPORT,
-			HID_REQ_GET_REPORT
+			&bytes_read,
+			100
 		);
-
-		if( result > 0 )
+		if( result >= 0 )
 		{
 			memcpy(
 				buffer + readbytes,
 				powersaves->buffer,
 				min(size, REPORT_SIZE)
 			);
-			readbytes += result;
+			readbytes += bytes_read;
 		}
 		else
 		{
 			hid_err(
 				powersaves->hid,
-				"%s: error reading report\n",
-				__func__
+				"%s: error reading report %d/%zu %d\n",
+				__func__,
+				readbytes,
+				size,
+				result
 			);
 			break;
 		}
