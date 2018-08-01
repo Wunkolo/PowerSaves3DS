@@ -279,7 +279,8 @@ int powersaves_get_gameid(
 	);
 	hid_info(
 		powersaves->hid,
-		"Test: %.64s\n",
+		"Test: %*phC\n",
+		64,
 		Response
 	);
 
@@ -297,11 +298,6 @@ int powersaves_get_gameid(
 		powersaves,
 		Response,
 		0x2000
-	);
-	hid_info(
-		powersaves->hid,
-		"NTR_Reset: %.64s\n",
-		Response
 	);
 
 	// Unknown
@@ -385,7 +381,6 @@ static int powersaves_probe(
 {
 	int result = 0;
 	// Get USB data
-	struct usb_interface* usbint = to_usb_interface(hdev->dev.parent);
 	struct usb_device* usbdev = hid_to_usb_dev(hdev);
 	struct powersaves_device* powersaves;
 	uint32_t GameID = 0;
