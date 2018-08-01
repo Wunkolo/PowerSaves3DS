@@ -69,6 +69,12 @@ enum powersaves_ntr_command
 	NTR_CMD_Data_Read      = 0xB7,
 	NTR_CMD_Data_ChipID    = 0xB8
 };
+
+enum powersaves_ctr_command
+{
+	CTR_CMD_GetHeader      = 0x82
+};
+
 struct powersaves_command
 {
 	uint8_t ID;
@@ -307,16 +313,6 @@ int powersaves_get_gameid(
 		powersaves,
 		&curcommand
 	);
-	powersaves_recv(
-		powersaves,
-		Response,
-		REPORT_SIZE
-	);
-	hid_info(
-		powersaves->hid,
-		"Magic: %.64s\n",
-		Response
-	);
 
 	// Get gamecard ID
 	curcommand = (struct powersaves_command){0};
@@ -337,6 +333,49 @@ int powersaves_get_gameid(
 	return result;
 }
 
+int powersaves_get_spi_id(
+	struct powersaves_device* powersaves,
+	uint32_t* spi_id
+)
+{
+	int result = 0;
+	struct powersaves_command curcommand = { 0 };
+
+	// Mode Switch
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeSwitch;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+
+	// Mode: SPI
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_ModeSPI;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+
+	// SPI_RDID
+	curcommand = (struct powersaves_command){0};
+	curcommand.ID = CMD_SPI;
+	curcommand.CommandLength = 1;
+	curcommand.ResponseLength = 4;
+	curcommand.SPICommand = SPI_RDID;
+	powersaves_send_command(
+		powersaves,
+		&curcommand
+	);
+	powersaves_recv(
+		powersaves,
+		spi_id,
+		4
+	);
+
+	return result;
+}
+
 /// HID Callbacks
 
 static int powersaves_probe(
@@ -350,6 +389,7 @@ static int powersaves_probe(
 	struct usb_device* usbdev = hid_to_usb_dev(hdev);
 	struct powersaves_device* powersaves;
 	uint32_t GameID = 0;
+	uint32_t SPIID = 0;
 
 	hid_info(
 		hdev,
@@ -439,11 +479,16 @@ static int powersaves_probe(
 	);
 
 	powersaves_get_gameid( powersaves, &GameID);
-
 	hid_info(
 		hdev,
 		"Gamecart ID: %08X\n",
 		GameID
+	);
+	powersaves_get_spi_id( powersaves, &SPIID);
+	hid_info(
+		hdev,
+		"SPI ID: %.08X\n",
+		SPIID
 	);
 	return result;
 }
