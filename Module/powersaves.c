@@ -153,7 +153,7 @@ static int powersaves_send_command(
 	{
 		hid_err(
 			powersaves->hid,
-			"%s: error writing full report: %d != %d\n",
+			"%s: error writing full report: %d != %zu\n",
 			__func__,
 			bytes_written,
 			REPORT_SIZE
@@ -221,7 +221,7 @@ static int powersaves_recv(
 		{
 			hid_err(
 				powersaves->hid,
-				"%s: error reading report %d/%zu %d\n",
+				"%s: error reading report %zu/%zu %d\n",
 				__func__,
 				readbytes,
 				size,
