@@ -162,20 +162,6 @@ static int powersaves_send_command(
 	return result;
 }
 
-static void powersaves_read_int_callback(
-	struct urb* urb
-)
-{
-	struct powersaves_device* powersaves = urb->context;
-	if( urb->status )
-	{
-		hid_err(
-			powersaves->hid,
-			"Error reading interrupt: %d",
-			urb->status
-		);
-	}
-}
 static int powersaves_recv(
 	struct powersaves_device* powersaves,
 	void* buffer,
