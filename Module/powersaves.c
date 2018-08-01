@@ -5,11 +5,13 @@
 #include <linux/device.h>
 #include <linux/input.h>
 #include <linux/hid.h>
+#include <linux/usb.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/string.h>
 #include <stddef.h>
 
+#include "usbhid/usbhid.h"
 
 MODULE_AUTHOR( "Wunkolo <wunkolo@gmail.com>" );
 MODULE_DESCRIPTION( "PowerSaves 3DS USB driver" );
@@ -88,6 +90,8 @@ struct powersaves_command
 struct powersaves_device
 {
 	struct hid_device* hid;
+	struct usb_device* usb;
+	struct urb* usb_urb;
 	struct mutex mutex;
 	// buffer of REPORT_SIZE for DMA tranfers
 	uint8_t* buffer;
@@ -101,6 +105,7 @@ static int powersaves_send_command(
 )
 {
 	int result = 0;
+	int bytes_written = 0;
 	memcpy(
 		powersaves->buffer,
 		command,
@@ -108,13 +113,24 @@ static int powersaves_send_command(
 	);
 
 	mutex_lock(&powersaves->mutex);
-	result = hid_hw_raw_request(
-		powersaves->hid,
-		0,
+	// result = hid_hw_raw_request(
+	// 	powersaves->hid,
+	// 	0,
+	// 	powersaves->buffer,
+	// 	REPORT_SIZE,
+	// 	HID_OUTPUT_REPORT,
+	// 	HID_REQ_SET_REPORT
+	// );
+	result = usb_interrupt_msg(
+		powersaves->usb,
+		usb_sndintpipe(
+			powersaves->usb,
+			0x1
+		),
 		powersaves->buffer,
 		REPORT_SIZE,
-		HID_OUTPUT_REPORT,
-		HID_REQ_SET_REPORT
+		&bytes_written,
+		100
 	);
 	mutex_unlock(&powersaves->mutex);
 
@@ -122,8 +138,19 @@ static int powersaves_send_command(
 	{
 		hid_err(
 			powersaves->hid,
-			"%s: error writing report\n",
-			__func__
+			"%s: error writing report: %d\n",
+			__func__,
+			result
+		);
+	}
+	if( bytes_written != REPORT_SIZE )
+	{
+		hid_err(
+			powersaves->hid,
+			"%s: error writing full report: %d != %d\n",
+			__func__,
+			bytes_written,
+			REPORT_SIZE
 		);
 	}
 	return result;
@@ -290,6 +317,9 @@ static int powersaves_probe(
 )
 {
 	int result = 0;
+	// Get USB data
+	struct usb_interface* usbint = to_usb_interface(hdev->dev.parent);
+	struct usb_device* usbdev = hid_to_usb_dev(hdev);
 	struct powersaves_device* powersaves;
 	uint32_t GameID = 0;
 
@@ -330,6 +360,19 @@ static int powersaves_probe(
 
 	// Init driver data
 	powersaves->hid = hdev;
+	powersaves->usb = usbdev;
+	powersaves->usb_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if( !powersaves-> usb_urb)
+	{
+		hid_err(
+			hdev,
+			"%s: error allocating URB staging buffer\n",
+			__func__
+		);
+		return -ENOMEM;
+	}
+
+
 	powersaves->buffer = devm_kzalloc(
 		&hdev->dev,
 		REPORT_SIZE,
@@ -349,7 +392,7 @@ static int powersaves_probe(
 	hid_set_drvdata(hdev, powersaves);
 
 	// Start hardware
-	result = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
+	result = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
 	if( result )
 	{
 		hid_err(
@@ -394,6 +437,8 @@ static void powersaves_remove(struct hid_device *hdev)
 	}
 
 	hid_hw_stop(hdev);
+
+	usb_free_urb(powersaves->usb_urb);
 }
 
 static const struct hid_device_id powersaves_device_list[] = {
